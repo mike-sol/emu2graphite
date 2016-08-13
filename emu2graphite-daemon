@@ -1,0 +1,72 @@
+#!/usr/bin/env ruby
+### BEGIN INIT INFO
+# Provides:          emu2graphite-daemon
+# Required-Start:    $remote_fs $syslog
+# Required-Stop:     $remote_fs $syslog
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Start daemon at boot time
+# Description:       Enable service provided by daemon.
+### END INIT INFO
+
+require 'serialport'
+require 'graphite-api'
+require 'daemons'
+require 'syslog/logger'
+
+Daemons.run_proc('emu2graphite-daemon', {:dir_mode => :system}) do
+
+  log = Syslog::Logger.new 'emu2graphite-daemon'
+
+  log.info 'EMU2 Graphite Daemon starting...'
+
+  begin
+  
+    graphite = GraphiteAPI.new(
+      graphite: "192.168.1.165:2003", # required argument
+    )
+
+    log.info 'Connected to Graphite.'
+  
+    ser = SerialPort.new("/dev/ttyACM0", 115200, 8, 1, SerialPort::NONE)
+
+    log.info 'Init complete, beginning to read lines from serial...'
+
+    while line = ser.readline
+      line.strip!
+      if line[0] != '<'
+        next
+      end
+
+      if /<Demand>/.match(line) 
+        dx = /<Demand>(0x[0-9A-Fa-f]+)/.match(line)
+        dxi = dx[1].to_i(16).to_f
+      end
+     
+      if /<Multiplier>/.match(line)
+        mx = /<Multiplier>(0x[0-9A-Fa-f]+)/.match(line)
+        mxi = mx[1].to_i(16).to_f
+      end
+
+
+      if /<Divisor>/.match(line)
+        dvx = /<Divisor>(0x[0-9A-Fa-f]+)/.match(line)
+        dvxi = dvx[1].to_i(16).to_f
+     
+        # Once we have a divisor the block is done, time to output
+        # First calculate the usage in kW
+        result = (dxi. * mxi) / dvxi
+
+        # Now write
+        log.info "Current usage: #{result} kw/hr"
+
+        graphite.metrics "power.kwh" => result
+
+      end
+    end
+  rescue
+    log.error "Error reading from serial or something, who knows, retrying."
+    retry
+  end 
+end
+	

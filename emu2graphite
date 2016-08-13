@@ -1,0 +1,45 @@
+#!/usr/bin/env ruby
+
+require 'serialport'
+require 'graphite-api'
+
+graphite = GraphiteAPI.new(
+  graphite: "192.168.1.165:2003", # required argument
+)
+
+ser = SerialPort.new("/dev/ttyACM0", 115200, 8, 1, SerialPort::NONE)
+
+while line = ser.readline
+  line.strip!
+  if line[0] != '<'
+    next
+  end
+
+  if /<Demand>/.match(line) 
+    dx = /<Demand>(0x[0-9A-Fa-f]+)/.match(line)
+    dxi = dx[1].to_i(16).to_f
+  end
+ 
+  if /<Multiplier>/.match(line)
+    mx = /<Multiplier>(0x[0-9A-Fa-f]+)/.match(line)
+    mxi = mx[1].to_i(16).to_f
+  end
+
+
+  if /<Divisor>/.match(line)
+    dvx = /<Divisor>(0x[0-9A-Fa-f]+)/.match(line)
+    dvxi = dvx[1].to_i(16).to_f
+ 
+    # Once we have a divisor the block is done, time to output
+    # First calculate the usage in kW
+    result = (dxi. * mxi) / dvxi
+
+    # Now write
+    puts "Current usage: #{result} kw/hr"
+
+    graphite.metrics "power.kwh" => result
+    
+
+  end
+end
+	
